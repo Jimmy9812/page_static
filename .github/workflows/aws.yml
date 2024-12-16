@@ -1,4 +1,5 @@
-name: Deploy Static HTML to EC2 with Docker
+
+name: Deploy Static HTML to EC2 with Docker and Nginx
 
 on:
   push:
@@ -28,27 +29,39 @@ jobs:
         docker tag my-static-html:latest ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest
         docker push ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest
 
-    # 4. Desplegar en la primera instancia EC2
-    - name: Deploy to EC2 QA1
+    # 4. Configurar y desplegar en la primera instancia EC2
+    - name: Setup and Deploy to EC2 QA1
       run: |
         ssh -i ec2_key.pem -o "StrictHostKeyChecking=no" \
           -o "UserKnownHostsFile=/dev/null" \
           ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP_QA1 }} \
-          "docker pull ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest && \
+          "sudo yum update -y && \
+           sudo yum install nginx -y && \
+           sudo systemctl start nginx && \
+           sudo systemctl enable nginx && \
+           sudo chmod -R 755 /usr/share/nginx/html && \
+           sudo chown -R ec2-user:ec2-user /usr/share/nginx/html && \
+           docker pull ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest && \
            docker stop static-html-container || true && \
            docker rm static-html-container || true && \
-           docker run -d --name static-html-container -p 80:80 -v ${{ secrets.DEPLOY_PATH }}:/usr/share/nginx/html nginx"
+           docker run -d --name static-html-container -p 80:80 -v /usr/share/nginx/html:/usr/share/nginx/html nginx"
 
-    # 5. Desplegar en la segunda instancia EC2
-    - name: Deploy to EC2 QA2
+    # 5. Configurar y desplegar en la segunda instancia EC2
+    - name: Setup and Deploy to EC2 QA2
       run: |
         ssh -i ec2_key.pem -o "StrictHostKeyChecking=no" \
           -o "UserKnownHostsFile=/dev/null" \
           ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP_QA2 }} \
-          "docker pull ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest && \
+          "sudo yum update -y && \
+           sudo yum install nginx -y && \
+           sudo systemctl start nginx && \
+           sudo systemctl enable nginx && \
+           sudo chmod -R 755 /usr/share/nginx/html && \
+           sudo chown -R ec2-user:ec2-user /usr/share/nginx/html && \
+           docker pull ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest && \
            docker stop static-html-container || true && \
            docker rm static-html-container || true && \
-           docker run -d --name static-html-container -p 80:80 -v ${{ secrets.DEPLOY_PATH }}:/usr/share/nginx/html nginx"
+           docker run -d --name static-html-container -p 80:80 -v /usr/share/nginx/html:/usr/share/nginx/html nginx"
 
     # 6. Limpia el archivo de la clave
     - name: Clean up
