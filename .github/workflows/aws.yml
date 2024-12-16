@@ -1,68 +1,88 @@
-
-name: Deploy Static HTML to EC2 with Docker and Nginx
+name: Docker Image LanguagePython
 
 on:
   push:
-    branches:
-      - qa  # Ejecuta solo en la rama qa
+    branches: [ "qa" ]
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Clona el repositorio
+    # 1. Clonar el repositorio
+    - name: Checkout Source
+      uses: actions/checkout@v3
+
+    # 2. Login en Docker Hub
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    # 3. Construir la imagen Docker
+    - name: Build the Docker image
+      run: docker build -t ${{ secrets.DOCKER_USERNAME }}/language-python-app .
+
+    # 4. Publicar la imagen en Docker Hub
+    - name: Publish image to Docker Hub
+      run: docker push ${{ secrets.DOCKER_USERNAME }}/language-python-app:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Clonar el repositorio
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # 2. Crear el archivo .pem desde el secreto
-    - name: Create SSH key
+    # 2. Configurar clave SSH para acceso a EC2
+    - name: Set up SSH key for EC2 access
       run: |
         echo "${{ secrets.EC2_SSH_KEY }}" > ec2_key.pem
         chmod 600 ec2_key.pem
 
-    # 3. Construir y subir la imagen Docker al registro
-    - name: Build and Push Docker Image
+    # 3. Configurar y desplegar en EC2 Instance 1
+    - name: SSH into EC2 (Instance 1) and deploy
       run: |
-        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login --username "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-        docker build -t my-static-html .
-        docker tag my-static-html:latest ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest
-        docker push ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest
+        ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ secrets.EC2_INSTANCE_IP_QA1 }} << 'EOF'
+          # Actualizar sistema e instalar Docker si no está instalado
+          sudo yum update -y
+          if ! command -v docker &> /dev/null; then
+            echo "Instalando Docker..."
+            sudo yum install -y docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+          fi
 
-    # 4. Configurar y desplegar en la primera instancia EC2
-    - name: Setup and Deploy to EC2 QA1
+          # Detener y eliminar el contenedor anterior si existe
+          sudo docker stop language-python-app || true
+          sudo docker rm language-python-app || true
+
+          # Descargar la nueva imagen y ejecutar el contenedor
+          sudo docker pull ${{ secrets.DOCKER_USERNAME }}/language-python-app:latest
+          sudo docker run -d --name language-python-app -p 80:80 ${{ secrets.DOCKER_USERNAME }}/language-python-app:latest
+        EOF
+
+    # 4. Configurar y desplegar en EC2 Instance 2
+    - name: SSH into EC2 (Instance 2) and deploy
       run: |
-        ssh -i ec2_key.pem -o "StrictHostKeyChecking=no" \
-          -o "UserKnownHostsFile=/dev/null" \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP_QA1 }} \
-          "sudo yum update -y && \
-           sudo yum install nginx -y && \
-           sudo systemctl start nginx && \
-           sudo systemctl enable nginx && \
-           sudo chmod -R 755 /usr/share/nginx/html && \
-           sudo chown -R ec2-user:ec2-user /usr/share/nginx/html && \
-           docker pull ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest && \
-           docker stop static-html-container || true && \
-           docker rm static-html-container || true && \
-           docker run -d --name static-html-container -p 80:80 -v /usr/share/nginx/html:/usr/share/nginx/html nginx"
+        ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ secrets.EC2_INSTANCE_IP_QA2 }} << 'EOF'
+          # Actualizar sistema e instalar Docker si no está instalado
+          sudo yum update -y
+          if ! command -v docker &> /dev/null; then
+            echo "Instalando Docker..."
+            sudo yum install -y docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+          fi
 
-    # 5. Configurar y desplegar en la segunda instancia EC2
-    - name: Setup and Deploy to EC2 QA2
-      run: |
-        ssh -i ec2_key.pem -o "StrictHostKeyChecking=no" \
-          -o "UserKnownHostsFile=/dev/null" \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP_QA2 }} \
-          "sudo yum update -y && \
-           sudo yum install nginx -y && \
-           sudo systemctl start nginx && \
-           sudo systemctl enable nginx && \
-           sudo chmod -R 755 /usr/share/nginx/html && \
-           sudo chown -R ec2-user:ec2-user /usr/share/nginx/html && \
-           docker pull ${{ secrets.DOCKER_USERNAME }}/my-static-html:latest && \
-           docker stop static-html-container || true && \
-           docker rm static-html-container || true && \
-           docker run -d --name static-html-container -p 80:80 -v /usr/share/nginx/html:/usr/share/nginx/html nginx"
+          # Detener y eliminar el contenedor anterior si existe
+          sudo docker stop language-python-app || true
+          sudo docker rm language-python-app || true
 
-    # 6. Limpia el archivo de la clave
-    - name: Clean up
-      run: rm -f ec2_key.pem
+          # Descargar la nueva imagen y ejecutar el contenedor
+          sudo docker pull ${{ secrets.DOCKER_USERNAME }}/language-python-app:latest
+          sudo docker run -d --name language-python-app -p 80:80 ${{ secrets.DOCKER_USERNAME }}/language-python-app:latest
+        EOF
